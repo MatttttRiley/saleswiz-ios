@@ -92,7 +92,8 @@ final class APIClient: ObservableObject {
         authError = nil
         defer { isAuthenticating = false }
 
-        let ok = await postLogin(password: password) && (await verifySession())
+        let posted = await postLogin(password: password)
+        let ok = posted ? await verifySession() : false
         if ok {
             _ = Keychain.savePassword(password)
             loggedIn = true
@@ -106,7 +107,9 @@ final class APIClient: ObservableObject {
     /// after a 401.
     func trySilentLogin() async -> Bool {
         guard let password = Keychain.readPassword() else { return false }
-        if await postLogin(password: password) && (await verifySession()) {
+        let posted = await postLogin(password: password)
+        let verified = posted ? await verifySession() : false
+        if verified {
             loggedIn = true
             return true
         }

@@ -8,28 +8,28 @@ import SwiftUI
 
 extension KeyedDecodingContainer {
     func decodeFlexString(forKey key: Key) -> String? {
-        if let s = try? decodeIfPresent(String.self, forKey: key), let v = s { return v }
-        if let i = try? decodeIfPresent(Int.self, forKey: key), let v = i { return String(v) }
-        if let d = try? decodeIfPresent(Double.self, forKey: key), let v = d { return String(v) }
+        if let s = try? decodeIfPresent(String.self, forKey: key) { return s }
+        if let i = try? decodeIfPresent(Int.self, forKey: key) { return String(i) }
+        if let d = try? decodeIfPresent(Double.self, forKey: key) { return String(d) }
         return nil
     }
 
     func decodeFlexInt(forKey key: Key) -> Int? {
-        if let i = try? decodeIfPresent(Int.self, forKey: key), let v = i { return v }
-        if let s = try? decodeIfPresent(String.self, forKey: key), let v = s, let n = Int(v) { return n }
-        if let d = try? decodeIfPresent(Double.self, forKey: key), let v = d { return Int(v) }
+        if let i = try? decodeIfPresent(Int.self, forKey: key) { return i }
+        if let s = try? decodeIfPresent(String.self, forKey: key), let n = Int(s) { return n }
+        if let d = try? decodeIfPresent(Double.self, forKey: key) { return Int(d) }
         return nil
     }
 
     func decodeFlexDouble(forKey key: Key) -> Double? {
-        if let d = try? decodeIfPresent(Double.self, forKey: key), let v = d { return v }
-        if let i = try? decodeIfPresent(Int.self, forKey: key), let v = i { return Double(v) }
-        if let s = try? decodeIfPresent(String.self, forKey: key), let v = s, let n = Double(v) { return n }
+        if let d = try? decodeIfPresent(Double.self, forKey: key) { return d }
+        if let i = try? decodeIfPresent(Int.self, forKey: key) { return Double(i) }
+        if let s = try? decodeIfPresent(String.self, forKey: key), let n = Double(s) { return n }
         return nil
     }
 
     func decodeFlexBool(forKey key: Key) -> Bool {
-        if let b = try? decodeIfPresent(Bool.self, forKey: key), let v = b { return v }
+        if let b = try? decodeIfPresent(Bool.self, forKey: key) { return b }
         if let i = decodeFlexInt(forKey: key) { return i != 0 }
         return false
     }
