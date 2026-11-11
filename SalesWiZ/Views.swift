@@ -1286,8 +1286,10 @@ struct ComposeEmailSheet: View {
                 Section("Subject") {
                     TextField("Subject", text: $subject)
                 }
-                Section("Message") {
+                Section {
                     TextField("Write your email…", text: $bodyText, axis: .vertical)
+                } header: {
+                    Text("Message")
                 } footer: {
                     Text("Queued mail is sent only after you approve the send.")
                 }
