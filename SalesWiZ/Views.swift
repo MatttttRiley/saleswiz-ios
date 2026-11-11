@@ -362,6 +362,7 @@ struct LeadDetailView: View {
     @EnvironmentObject var api: APIClient
     let leadId: Int
     @State private var lead: Lead?
+    @State private var emails: [EmailMessage] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showLogCall = false
@@ -442,6 +443,18 @@ struct LeadDetailView: View {
                         }
                         if let grok = lead.grokSetupStatus, !grok.isEmpty {
                             LabeledContent("Grok setup") { Text(grok) }
+                        }
+                    }
+
+                    if !emails.isEmpty {
+                        Section("Emails") {
+                            ForEach(emails) { message in
+                                NavigationLink {
+                                    EmailDetailView(email: message)
+                                } label: {
+                                    EmailRow(email: message)
+                                }
+                            }
                         }
                     }
 
@@ -539,6 +552,11 @@ struct LeadDetailView: View {
             lead = try await api.fetchLead(id: leadId)
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        // The email thread is nice to have, not load-blocking: a failure
+        // just leaves the section out.
+        if let fetched = try? await api.fetchEmails(leadId: leadId, limit: 50) {
+            emails = fetched.emails
         }
         isLoading = false
     }
@@ -919,5 +937,531 @@ struct AddLeadView: View {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isSaving = false
+    }
+}
+
+// MARK: - Inbox
+
+struct EmailBadge: View {
+    let email: EmailMessage
+
+    var body: some View {
+        Text(email.badgeLabel)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(email.badgeColor.opacity(0.15))
+            .foregroundStyle(email.badgeColor)
+            .clipShape(Capsule())
+    }
+}
+
+struct EmailRow: View {
+    let email: EmailMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                EmailBadge(email: email)
+                Text(email.leadName ?? email.counterpart)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                if let received = email.receivedAt {
+                    Text(received.prettyDateTime)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(email.subject ?? "(no subject)")
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            if let body = email.body, !body.isEmpty {
+                Text(body)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct InboxView: View {
+    @EnvironmentObject var api: APIClient
+    @State private var emails: [EmailMessage] = []
+    @State private var total = 0
+    @State private var isLoading = false
+    @State private var isLoadingMore = false
+    @State private var errorMessage: String?
+    @State private var showCompose = false
+
+    var body: some View {
+        Group {
+            if !emails.isEmpty {
+                List {
+                    ForEach(emails) { email in
+                        NavigationLink {
+                            EmailDetailView(email: email)
+                        } label: {
+                            EmailRow(email: email)
+                                .onAppear {
+                                    if email == emails.last { Task { await loadMore() } }
+                                }
+                        }
+                    }
+                    if isLoadingMore {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .refreshable { await reload() }
+            } else if isLoading {
+                ProgressView("Loading…")
+            } else {
+                ContentUnavailableView {
+                    Label("No emails yet", systemImage: "envelope")
+                } description: {
+                    Text(errorMessage ?? "Replies to outreach will show up here.")
+                } actions: {
+                    Button("Try Again") { Task { await reload() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Inbox")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showCompose = true } label: {
+                    Label("Compose", systemImage: "square.and.pencil")
+                }
+            }
+        }
+        .task { await reload() }
+        .sheet(isPresented: $showCompose) {
+            ComposeEmailSheet { Task { await reload() } }
+        }
+    }
+
+    private func reload() async {
+        if emails.isEmpty { isLoading = true }
+        errorMessage = nil
+        do {
+            let response = try await api.fetchEmails(limit: 50, offset: 0)
+            emails = response.emails
+            total = response.total
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func loadMore() async {
+        guard !isLoadingMore, emails.count < total else { return }
+        isLoadingMore = true
+        do {
+            let response = try await api.fetchEmails(limit: 50, offset: emails.count)
+            emails += response.emails
+            total = response.total
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoadingMore = false
+    }
+}
+
+// MARK: - Email detail + reply
+
+struct EmailDetailView: View {
+    @EnvironmentObject var api: APIClient
+    let email: EmailMessage
+    @State private var thread: [EmailMessage] = []
+    @State private var showReply = false
+
+    private var threadOthers: [EmailMessage] {
+        thread.filter { $0.id != email.id }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                HStack {
+                    EmailBadge(email: email)
+                    Spacer()
+                    if let received = email.receivedAt {
+                        Text(received.prettyDateTime)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("From") {
+                    Text(email.fromAddr ?? "—")
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("To") {
+                    Text(email.toAddr ?? "—")
+                        .multilineTextAlignment(.trailing)
+                }
+                if let error = email.error, !error.isEmpty {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+                if let body = email.body, !body.isEmpty {
+                    Text(body)
+                        .padding(.vertical, 2)
+                }
+            } header: {
+                Text(email.subject ?? "(no subject)")
+            }
+
+            if let leadId = email.leadId {
+                Section {
+                    NavigationLink {
+                        LeadDetailView(leadId: leadId)
+                    } label: {
+                        Label(email.leadName ?? "View lead", systemImage: "person.fill")
+                    }
+                }
+            }
+
+            if !threadOthers.isEmpty {
+                Section("Thread") {
+                    ForEach(threadOthers) { other in
+                        NavigationLink {
+                            EmailDetailView(email: other)
+                        } label: {
+                            EmailRow(email: other)
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(email.leadName ?? email.counterpart)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if email.isInbound, !(email.fromAddr ?? "").isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Reply") { showReply = true }
+                }
+            }
+        }
+        .sheet(isPresented: $showReply) {
+            ReplySheet(email: email) { Task { await loadThread() } }
+        }
+        .task { await loadThread() }
+    }
+
+    private func loadThread() async {
+        guard let leadId = email.leadId else { return }
+        if let response = try? await api.fetchEmails(leadId: leadId, limit: 50) {
+            thread = response.emails
+        }
+    }
+}
+
+struct ReplySheet: View {
+    @EnvironmentObject var api: APIClient
+    let email: EmailMessage
+    let onSent: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var bodyText = ""
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    private var subject: String {
+        let subject = email.subject ?? ""
+        if subject.lowercased().hasPrefix("re:") { return subject }
+        return "Re: \(subject)"
+    }
+
+    /// The original, quoted, appended to the sent body (same as the web inbox).
+    private var quotedOriginal: String {
+        let lines = (email.body ?? "").split(separator: "\n", omittingEmptySubsequences: false)
+        let quoted = lines.map { "> \($0)" }.joined(separator: "\n")
+        let date = email.receivedAt?.prettyDateTime ?? ""
+        let from = email.fromAddr ?? ""
+        return "\n\nOn \(date), \(from) wrote:\n\(quoted)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("To") {
+                    Text(email.fromAddr ?? "")
+                }
+                Section("Subject") {
+                    Text(subject)
+                }
+                Section("Message") {
+                    TextField("Write your reply…", text: $bodyText, axis: .vertical)
+                }
+                Section("Quoted original") {
+                    Text(quotedOriginal)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Reply")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Queue") { Task { await send() } }
+                        .disabled(bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+                }
+            }
+        }
+    }
+
+    private func send() async {
+        isSending = true
+        errorMessage = nil
+        do {
+            _ = try await api.queueEmail(
+                leadId: email.leadId,
+                to: email.fromAddr ?? "",
+                subject: subject,
+                body: bodyText + quotedOriginal,
+                inReplyTo: email.gmailId)
+            onSent()
+            dismiss()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isSending = false
+    }
+}
+
+// MARK: - Compose
+
+struct ComposeEmailSheet: View {
+    @EnvironmentObject var api: APIClient
+    let onSent: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var to = ""
+    @State private var subject = ""
+    @State private var bodyText = ""
+    @State private var leadId: Int?
+    @State private var leadName: String?
+    @State private var showLeadPicker = false
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    private var toLooksValid: Bool { to.contains("@") && to.contains(".") }
+
+    private var canSend: Bool {
+        toLooksValid
+            && !subject.trimmingCharacters(in: .whitespaces).isEmpty
+            && !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isSending
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("To") {
+                    TextField("Email address", text: $to)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if let leadName {
+                        Label(leadName, systemImage: "person.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Choose a lead…") { showLeadPicker = true }
+                }
+                Section("Subject") {
+                    TextField("Subject", text: $subject)
+                }
+                Section("Message") {
+                    TextField("Write your email…", text: $bodyText, axis: .vertical)
+                } footer: {
+                    Text("Queued mail is sent only after you approve the send.")
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("New Email")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Queue") { Task { await send() } }
+                        .disabled(!canSend)
+                }
+            }
+            .sheet(isPresented: $showLeadPicker) {
+                LeadPickerSheet { lead in
+                    leadId = lead.id
+                    leadName = lead.name
+                    if let email = lead.email, !email.isEmpty { to = email }
+                }
+            }
+        }
+    }
+
+    private func send() async {
+        isSending = true
+        errorMessage = nil
+        do {
+            _ = try await api.queueEmail(
+                leadId: leadId,
+                to: to.trimmingCharacters(in: .whitespaces),
+                subject: subject.trimmingCharacters(in: .whitespaces),
+                body: bodyText,
+                inReplyTo: nil)
+            onSent()
+            dismiss()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isSending = false
+    }
+}
+
+struct LeadPickerSheet: View {
+    @EnvironmentObject var api: APIClient
+    let onPick: (Lead) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var searchText = ""
+    @State private var leads: [Lead] = []
+
+    var body: some View {
+        NavigationStack {
+            List(leads) { lead in
+                Button {
+                    onPick(lead)
+                    dismiss()
+                } label: {
+                    LeadRow(lead: lead)
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Choose a Lead")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search name, city, email")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task(id: searchText) {
+                // Debounce typing; .task(id:) cancels the previous task on change.
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
+                await search()
+            }
+        }
+    }
+
+    private func search() async {
+        if let response = try? await api.fetchLeads(
+            search: searchText, industry: nil, status: nil, limit: 20, offset: 0) {
+            leads = response.leads
+        }
+    }
+}
+
+// MARK: - Interest
+
+struct InterestRow: View {
+    let lead: Lead
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(lead.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                StatusBadge(status: lead.statusInfo)
+            }
+            Text([lead.contactPerson, lead.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if let snippet = lead.replySnippet, !snippet.isEmpty {
+                Text(snippet)
+                    .font(.subheadline)
+                    .lineLimit(2)
+            }
+            if let replied = lead.dateReplied {
+                Text("Replied \(replied.prettyDate)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct InterestView: View {
+    @EnvironmentObject var api: APIClient
+    @State private var leads: [Lead] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if !leads.isEmpty {
+                List {
+                    ForEach(leads) { lead in
+                        NavigationLink(value: lead) {
+                            InterestRow(lead: lead)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .refreshable { await load() }
+            } else if isLoading {
+                ProgressView("Loading…")
+            } else {
+                ContentUnavailableView {
+                    Label("No interest yet", systemImage: "star")
+                } description: {
+                    Text(errorMessage ?? "When someone replies to outreach, they'll show up here.")
+                } actions: {
+                    Button("Try Again") { Task { await load() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Interest")
+        .navigationDestination(for: Lead.self) { lead in
+            LeadDetailView(leadId: lead.id)
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        if leads.isEmpty { isLoading = true }
+        errorMessage = nil
+        do {
+            let response = try await api.fetchInterestedLeads()
+            leads = response.leads
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoading = false
     }
 }

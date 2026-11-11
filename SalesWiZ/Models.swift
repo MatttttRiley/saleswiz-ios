@@ -101,6 +101,7 @@ struct Lead: Decodable, Identifiable, Hashable {
     var billingRenewalDate: String?
     var inCallQueue: Bool
     var queuedBatch: Int?
+    var replySnippet: String?
     var history: [HistoryEvent]?
 
     enum CodingKeys: String, CodingKey {
@@ -121,6 +122,7 @@ struct Lead: Decodable, Identifiable, Hashable {
         case billingRenewalDate = "billing_renewal_date"
         case inCallQueue = "in_call_queue"
         case queuedBatch = "queued_batch"
+        case replySnippet = "reply_snippet"
         case history
     }
 
@@ -151,6 +153,7 @@ struct Lead: Decodable, Identifiable, Hashable {
         billingRenewalDate = c.decodeFlexString(forKey: .billingRenewalDate)
         inCallQueue = c.decodeFlexBool(forKey: .inCallQueue)
         queuedBatch = c.decodeFlexInt(forKey: .queuedBatch)
+        replySnippet = c.decodeFlexString(forKey: .replySnippet)
         history = try? c.decodeIfPresent([HistoryEvent].self, forKey: .history)
     }
 
@@ -693,5 +696,124 @@ extension Date {
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(identifier: "America/Denver")
         return f.string(from: self)
+    }
+}
+
+// MARK: - Email
+
+/// One row of the CRM `emails` table (Gmail integration). Inbound rows are
+/// synced in by the bridge; outbound rows are queued here and sent by the
+/// bridge only after Matt approves each send.
+struct EmailMessage: Decodable, Identifiable, Hashable {
+    let id: Int
+    var leadId: Int?
+    var direction: String
+    var fromAddr: String?
+    var toAddr: String?
+    var subject: String?
+    var body: String?
+    var gmailId: String?
+    var receivedAt: String?
+    var status: String?
+    var error: String?
+    var leadName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, direction, subject, body, status, error
+        case leadId = "lead_id"
+        case fromAddr = "from_addr"
+        case toAddr = "to_addr"
+        case gmailId = "gmail_id"
+        case receivedAt = "received_at"
+        case leadName = "lead_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.decodeFlexInt(forKey: .id) ?? 0
+        leadId = c.decodeFlexInt(forKey: .leadId)
+        direction = c.decodeFlexString(forKey: .direction) ?? "in"
+        fromAddr = c.decodeFlexString(forKey: .fromAddr)
+        toAddr = c.decodeFlexString(forKey: .toAddr)
+        subject = c.decodeFlexString(forKey: .subject)
+        body = c.decodeFlexString(forKey: .body)
+        gmailId = c.decodeFlexString(forKey: .gmailId)
+        receivedAt = c.decodeFlexString(forKey: .receivedAt)
+        status = c.decodeFlexString(forKey: .status)
+        error = c.decodeFlexString(forKey: .error)
+        leadName = c.decodeFlexString(forKey: .leadName)
+    }
+
+    var isInbound: Bool { direction == "in" }
+
+    /// The other side of the conversation: who sent it (inbound) or who it
+    /// goes to (outbound).
+    var counterpart: String {
+        isInbound ? (fromAddr ?? "") : (toAddr ?? "")
+    }
+
+    var badgeLabel: String {
+        if isInbound { return "In" }
+        switch status {
+        case "queued": return "Queued"
+        case "sent": return "Sent"
+        case "failed": return "Failed"
+        default: return "Out"
+        }
+    }
+
+    var badgeColor: Color {
+        if isInbound { return .blue }
+        switch status {
+        case "queued": return .orange
+        case "sent": return .green
+        case "failed": return .red
+        default: return .secondary
+        }
+    }
+}
+
+struct EmailsResponse: Decodable {
+    var emails: [EmailMessage]
+    var total: Int
+
+    enum CodingKeys: String, CodingKey { case emails, total }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        emails = (try? c.decodeIfPresent([EmailMessage].self, forKey: .emails)) ?? []
+        total = c.decodeFlexInt(forKey: .total) ?? 0
+    }
+}
+
+struct InterestedLeadsResponse: Decodable {
+    var leads: [Lead]
+    var total: Int
+
+    enum CodingKeys: String, CodingKey { case leads, total }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        leads = (try? c.decodeIfPresent([Lead].self, forKey: .leads)) ?? []
+        total = c.decodeFlexInt(forKey: .total) ?? 0
+    }
+}
+
+struct QueuedEmailResponse: Decodable {
+    var email: EmailMessage
+}
+
+extension String {
+    /// "2026-11-11 09:13:41" -> "Nov 11, 2026 at 9:13 AM", or the string itself.
+    var prettyDateTime: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "America/Denver")
+        guard let date = f.date(from: self) else { return self }
+        let out = DateFormatter()
+        out.dateStyle = .medium
+        out.timeStyle = .short
+        return out.string(from: date)
     }
 }

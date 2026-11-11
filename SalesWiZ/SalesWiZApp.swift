@@ -52,6 +52,10 @@ struct MainTabs: View {
                 .tabItem { Label("Dashboard", systemImage: "gauge.with.needle") }
             NavigationStack { LeadsView() }
                 .tabItem { Label("Leads", systemImage: "person.2.fill") }
+            NavigationStack { InboxView() }
+                .tabItem { Label("Inbox", systemImage: "envelope.fill") }
+            NavigationStack { InterestView() }
+                .tabItem { Label("Interest", systemImage: "star.fill") }
             NavigationStack { ActionsView() }
                 .tabItem { Label("Actions", systemImage: "checklist") }
         }

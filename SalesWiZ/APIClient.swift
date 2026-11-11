@@ -173,6 +173,16 @@ final class APIClient: ObservableObject {
         try await get(action: "actions")
     }
 
+    func fetchEmails(leadId: Int? = nil, limit: Int = 50, offset: Int = 0) async throws -> EmailsResponse {
+        var params: [String: String] = ["limit": String(limit), "offset": String(offset)]
+        if let leadId { params["lead_id"] = String(leadId) }
+        return try await get(action: "list_emails", params: params)
+    }
+
+    func fetchInterestedLeads() async throws -> InterestedLeadsResponse {
+        try await get(action: "interested_leads")
+    }
+
     // MARK: Writes
 
     func logCall(leadId: Int, outcome: String, note: String?, followUpDue: String?) async throws -> Lead {
@@ -218,6 +228,19 @@ final class APIClient: ObservableObject {
 
     func queueBatch() async throws -> QueueBatchResult {
         try await post(action: "queue_batch", body: [:])
+    }
+
+    /// Queue an outbound email. It only sends after Matt approves the send
+    /// (the bridge sends queued rows one approved row at a time). Returns
+    /// the queued row. Pass `inReplyTo` (the Gmail id of the message being
+    /// answered) to inherit that message's lead when `leadId` is nil.
+    func queueEmail(leadId: Int?, to: String, subject: String, body: String,
+                    inReplyTo: String?) async throws -> EmailMessage {
+        var payload: [String: String] = ["to": to, "subject": subject, "body": body]
+        if let leadId { payload["lead_id"] = String(leadId) }
+        if let inReplyTo, !inReplyTo.isEmpty { payload["in_reply_to"] = inReplyTo }
+        let response: QueuedEmailResponse = try await post(action: "queue_email", body: payload)
+        return response.email
     }
 
     // MARK: Transport
