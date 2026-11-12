@@ -50,6 +50,8 @@ struct MainTabs: View {
         TabView {
             NavigationStack { DashboardView() }
                 .tabItem { Label("Dashboard", systemImage: "gauge.with.needle") }
+            NavigationStack { CallListView() }
+                .tabItem { Label("Calls", systemImage: "phone.fill") }
             NavigationStack { LeadsView() }
                 .tabItem { Label("Leads", systemImage: "person.2.fill") }
             NavigationStack { InboxView() }

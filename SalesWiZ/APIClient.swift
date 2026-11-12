@@ -183,6 +183,10 @@ final class APIClient: ObservableObject {
         try await get(action: "interested_leads")
     }
 
+    func fetchCallList() async throws -> LeadsResponse {
+        try await get(action: "call_list")
+    }
+
     // MARK: Writes
 
     func logCall(leadId: Int, outcome: String, note: String?, followUpDue: String?) async throws -> Lead {
@@ -190,6 +194,20 @@ final class APIClient: ObservableObject {
         if let note, !note.isEmpty { body["note"] = note }
         if let followUpDue { body["follow_up_due"] = followUpDue }
         let response: LeadResponse = try await post(action: "log_call", body: body)
+        return response.lead
+    }
+
+    /// Matt's own calls from the Call List tab. Mirrors the web page:
+    /// interested pins the lead to the top (priority 100) and fires the
+    /// interest push; callback sets priority 70; a captured email updates
+    /// the lead for the deck flow.
+    func logCallOutcome(leadId: Int, outcome: String, notes: String?,
+                        email: String?, followUp: String?) async throws -> Lead {
+        var body: [String: String] = ["lead_id": String(leadId), "outcome": outcome]
+        if let notes, !notes.isEmpty { body["notes"] = notes }
+        if let email, !email.isEmpty { body["email"] = email }
+        if let followUp, !followUp.isEmpty { body["follow_up"] = followUp }
+        let response: LeadResponse = try await post(action: "log_call_outcome", body: body)
         return response.lead
     }
 

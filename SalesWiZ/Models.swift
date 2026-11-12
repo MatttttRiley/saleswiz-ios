@@ -75,6 +75,43 @@ struct HistoryEvent: Decodable, Identifiable, Hashable {
     }
 }
 
+struct OpensSummary: Decodable, Hashable {
+    var count: Int?
+    var firstAt: String?
+    var lastAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case count
+        case firstAt = "first_at"
+        case lastAt = "last_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = c.decodeFlexInt(forKey: .count)
+        firstAt = c.decodeFlexString(forKey: .firstAt)
+        lastAt = c.decodeFlexString(forKey: .lastAt)
+    }
+}
+
+struct LastHistory: Decodable, Hashable {
+    var createdAt: String?
+    var kind: String?
+    var text: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, text
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        createdAt = c.decodeFlexString(forKey: .createdAt)
+        kind = c.decodeFlexString(forKey: .kind)
+        text = c.decodeFlexString(forKey: .text)
+    }
+}
+
 struct Lead: Decodable, Identifiable, Hashable {
     let id: Int
     var name: String
@@ -102,6 +139,10 @@ struct Lead: Decodable, Identifiable, Hashable {
     var inCallQueue: Bool
     var queuedBatch: Int?
     var replySnippet: String?
+    var priority: Int?
+    var openCount: Int?
+    var opens: OpensSummary?
+    var lastHistory: LastHistory?
     var history: [HistoryEvent]?
 
     enum CodingKeys: String, CodingKey {
@@ -123,6 +164,10 @@ struct Lead: Decodable, Identifiable, Hashable {
         case inCallQueue = "in_call_queue"
         case queuedBatch = "queued_batch"
         case replySnippet = "reply_snippet"
+        case priority
+        case openCount = "open_count"
+        case opens
+        case lastHistory = "last_history"
         case history
     }
 
@@ -154,6 +199,10 @@ struct Lead: Decodable, Identifiable, Hashable {
         inCallQueue = c.decodeFlexBool(forKey: .inCallQueue)
         queuedBatch = c.decodeFlexInt(forKey: .queuedBatch)
         replySnippet = c.decodeFlexString(forKey: .replySnippet)
+        priority = c.decodeFlexInt(forKey: .priority)
+        openCount = c.decodeFlexInt(forKey: .openCount)
+        opens = try? c.decodeIfPresent(OpensSummary.self, forKey: .opens)
+        lastHistory = try? c.decodeIfPresent(LastHistory.self, forKey: .lastHistory)
         history = try? c.decodeIfPresent([HistoryEvent].self, forKey: .history)
     }
 
@@ -515,6 +564,8 @@ struct Dashboard: Decodable {
     var inCallQueue: Int?
     var followupsDue: Int?
     var followupsToday: Int?
+    var emailsOpened: Int?
+    var opensTotal: Int?
     var byIndustry: [String: IndustryStats]?
     var money: Money?
     var rates: [String: StageRate]?
@@ -538,6 +589,8 @@ struct Dashboard: Decodable {
         case inCallQueue = "in_call_queue"
         case followupsDue = "followups_due"
         case followupsToday = "followups_today"
+        case emailsOpened = "emails_opened"
+        case opensTotal = "opens_total"
         case byIndustry = "by_industry"
         case money, rates, eta, progress
         case nextBatch = "next_batch"
@@ -569,6 +622,8 @@ struct Dashboard: Decodable {
         inCallQueue = c.decodeFlexInt(forKey: .inCallQueue)
         followupsDue = c.decodeFlexInt(forKey: .followupsDue)
         followupsToday = c.decodeFlexInt(forKey: .followupsToday)
+        emailsOpened = c.decodeFlexInt(forKey: .emailsOpened)
+        opensTotal = c.decodeFlexInt(forKey: .opensTotal)
         byIndustry = try? c.decodeIfPresent([String: IndustryStats].self, forKey: .byIndustry)
         money = try? c.decodeIfPresent(Money.self, forKey: .money)
         rates = try? c.decodeIfPresent([String: StageRate].self, forKey: .rates)

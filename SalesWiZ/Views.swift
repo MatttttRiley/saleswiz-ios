@@ -64,6 +64,34 @@ struct ProgressBarView: View {
     }
 }
 
+struct PriorityBadge: View {
+    let priority: Int
+
+    var body: some View {
+        Text("★ Priority \(priority)")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.green.opacity(0.15))
+            .foregroundStyle(.green)
+            .clipShape(Capsule())
+    }
+}
+
+struct OpensBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text("Opened ×\(count)")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.12))
+            .foregroundStyle(.blue)
+            .clipShape(Capsule())
+    }
+}
+
 struct LeadRow: View {
     let lead: Lead
 
@@ -87,7 +115,15 @@ struct LeadRow: View {
                 }
             }
             Spacer()
-            StatusBadge(status: lead.statusInfo)
+            VStack(alignment: .trailing, spacing: 4) {
+                StatusBadge(status: lead.statusInfo)
+                if let priority = lead.priority, priority > 0 {
+                    PriorityBadge(priority: priority)
+                }
+                if let opens = lead.openCount, opens > 0 {
+                    OpensBadge(count: opens)
+                }
+            }
         }
         .padding(.vertical, 2)
     }
@@ -146,6 +182,7 @@ struct DashboardView: View {
                             StatTile(value: "\(dashboard.customers ?? 0)", label: "Customers")
                             StatTile(value: "\(dashboard.bounced ?? 0)", label: "Bounced")
                             StatTile(value: "\(dashboard.notContacted ?? 0)", label: "Not contacted")
+                            StatTile(value: "\(dashboard.emailsOpened ?? 0)", label: "Emails opened")
                         }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -417,6 +454,23 @@ struct LeadDetailView: View {
 
                     Section("Details") {
                         LabeledContent("Status") { Text(lead.statusInfo.label) }
+                        if let priority = lead.priority, priority > 0 {
+                            LabeledContent("Priority") {
+                                Text("★ \(priority)")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        if let opens = lead.opens {
+                            LabeledContent("Email opens") {
+                                if let count = opens.count, count > 0 {
+                                    Text("Opened — \(count) time\(count == 1 ? "" : "s")\(opens.lastAt.map { " · last \($0.prettyDateTime)" } ?? "")")
+                                        .multilineTextAlignment(.trailing)
+                                } else {
+                                    Text("Not opened yet")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                         if let emailed = lead.dateEmailed {
                             LabeledContent("Emailed") { Text(emailed.prettyDate) }
                         }
@@ -855,6 +909,267 @@ struct ActionsView: View {
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
+    }
+}
+
+// MARK: - Call List (Matt's own calls)
+
+struct CallOutcomeOption: Identifiable {
+    let value: String
+    let label: String
+    var id: String { value }
+
+    static let all: [CallOutcomeOption] = [
+        CallOutcomeOption(value: "interested", label: "Successful — interested"),
+        CallOutcomeOption(value: "callback", label: "Callback requested"),
+        CallOutcomeOption(value: "no_answer", label: "No answer"),
+        CallOutcomeOption(value: "gatekeeper", label: "Gatekeeper / left message"),
+        CallOutcomeOption(value: "not_interested", label: "Not interested"),
+        CallOutcomeOption(value: "wrong_number", label: "Wrong number"),
+        CallOutcomeOption(value: "other", label: "Other"),
+    ]
+}
+
+struct CallListRow: View {
+    let lead: Lead
+    let onLogOutcome: (Lead) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lead.name)
+                        .font(.headline)
+                        .lineLimit(2)
+                    Text([lead.industry.map { Industry.label(for: $0) }, lead.city, lead.contactPerson]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    StatusBadge(status: lead.statusInfo)
+                    if let priority = lead.priority, priority > 0 {
+                        PriorityBadge(priority: priority)
+                    }
+                }
+            }
+
+            if let phone = lead.phone, !phone.isEmpty, let url = lead.telURL {
+                Link(destination: url) {
+                    Label(phone, systemImage: "phone.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Color.salesNavy)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let email = lead.email, !email.isEmpty {
+                Text(email)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            if let last = lead.lastHistory, let text = last.text, !text.isEmpty {
+                Text("Last: \(last.createdAt ?? "") — \(text)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            } else if let called = lead.dateCalled {
+                Text("Last call: \(called.prettyDate)\(lead.callOutcome.map { " — \($0)" } ?? "")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let follow = lead.followUpDue, !follow.isEmpty {
+                Text("Follow-up: \(follow)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Button {
+                    onLogOutcome(lead)
+                } label: {
+                    Label("Log outcome", systemImage: "checklist")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(Color.salesNavy)
+                Spacer()
+                NavigationLink(value: lead) {
+                    Text("Details")
+                        .font(.subheadline)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct CallListView: View {
+    @EnvironmentObject var api: APIClient
+    @State private var leads: [Lead] = []
+    @State private var total = 0
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var searchText = ""
+    @State private var loggingLead: Lead?
+
+    private var filtered: [Lead] {
+        guard !searchText.isEmpty else { return leads }
+        let needle = searchText.lowercased()
+        return leads.filter {
+            $0.name.lowercased().contains(needle)
+                || ($0.city ?? "").lowercased().contains(needle)
+                || ($0.industry ?? "").lowercased().contains(needle)
+                || ($0.phone ?? "").contains(searchText)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if !leads.isEmpty {
+                List {
+                    Section {
+                        ForEach(filtered) { lead in
+                            CallListRow(lead: lead) { selected in
+                                loggingLead = selected
+                            }
+                        }
+                    } header: {
+                        Text("\(total) businesses to call")
+                    } footer: {
+                        Text("Tap a number to call. Log the outcome right after — a successful call pushes the lead to the top of the CRM.")
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .refreshable { await load() }
+            } else if isLoading {
+                ProgressView("Loading…")
+            } else {
+                ContentUnavailableView {
+                    Label("No businesses on the list", systemImage: "phone")
+                } description: {
+                    Text(errorMessage ?? "The St. George-area call list is empty.")
+                } actions: {
+                    Button("Try Again") { Task { await load() } }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Call List")
+        .navigationDestination(for: Lead.self) { lead in
+            LeadDetailView(leadId: lead.id)
+        }
+        .searchable(text: $searchText, prompt: "Search name, city, phone")
+        .task { await load() }
+        .sheet(item: $loggingLead) { lead in
+            LogCallOutcomeSheet(lead: lead) {
+                Task { await load() }
+            }
+        }
+        .alert("Couldn't load the call list", isPresented: .constant(errorMessage != nil && !leads.isEmpty)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func load() async {
+        if leads.isEmpty { isLoading = true }
+        errorMessage = nil
+        do {
+            let response = try await api.fetchCallList()
+            leads = response.leads
+            total = response.total
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+struct LogCallOutcomeSheet: View {
+    @EnvironmentObject var api: APIClient
+    let lead: Lead
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var outcome = "interested"
+    @State private var notes = ""
+    @State private var email = ""
+    @State private var followUp = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Outcome") {
+                    Picker("Outcome", selection: $outcome) {
+                        ForEach(CallOutcomeOption.all) { option in
+                            Text(option.label).tag(option.value)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+                Section("Notes") {
+                    TextField("Who you spoke to, what they said…", text: $notes, axis: .vertical)
+                }
+                Section("Email") {
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                if outcome == "interested" || outcome == "callback" {
+                    Section("Discussion time") {
+                        TextField("e.g. Thu 2pm, or 2026-11-14", text: $followUp)
+                            .autocorrectionDisabled()
+                    }
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(lead.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save call") { Task { await save() } }
+                        .disabled(isSaving)
+                }
+            }
+            .onAppear {
+                if email.isEmpty { email = lead.email ?? "" }
+            }
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        errorMessage = nil
+        do {
+            _ = try await api.logCallOutcome(
+                leadId: lead.id, outcome: outcome,
+                notes: notes.isEmpty ? nil : notes,
+                email: email.isEmpty ? nil : email,
+                followUp: followUp.isEmpty ? nil : followUp)
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        isSaving = false
     }
 }
 
