@@ -33,6 +33,14 @@ third-party dependencies, no web views.
   `log_call_outcome` — the same endpoint as the web Call List, so an
   "interested" outcome pins the lead to the top and fires the interest
   push.
+- **Swipe actions** (v1.2.2) — on the Call List, swipe a card left for
+  two quick actions: **Interested** (green) opens the outcome form
+  pre-set to interested so notes/email/discussion time can be added —
+  saving pins the lead to the top (priority 100, interest push fires);
+  **Not interested** (red) asks for confirmation, then logs the outcome
+  and flags the lead do-not-call, which removes it from the Call List
+  for good (the record stays in the CRM as lost, so it is never
+  re-researched or re-added). Swiping right also offers Interested.
 - **Copy number** (v1.2.1) — every Call List card and the lead page get
   a Copy button next to the phone number, so the number can be pasted
   into the Google Voice dialer. Matt's business calls go out on his
@@ -123,4 +131,3 @@ Not tested (needs a phone):
   `update_lead`, `add_lead`, `queue_batch`) were verified against the
   server source (`api.php`) but deliberately NOT executed against the live
   database, so no test data pollutes the real CRM.
-
