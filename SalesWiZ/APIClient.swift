@@ -211,6 +211,15 @@ final class APIClient: ObservableObject {
         return response.lead
     }
 
+    /// Flags a lead do-not-call. Call List (web + app) excludes flagged
+    /// leads server-side, so this removes the lead from the calling list
+    /// for good while keeping its record (and history) in the CRM.
+    func markDoNotCall(leadId: Int) async throws -> Lead {
+        let body: [String: String] = ["id": String(leadId), "do_not_call": "1"]
+        let response: LeadResponse = try await post(action: "update_lead", body: body)
+        return response.lead
+    }
+
     func logReply(leadId: Int, note: String?) async throws -> Lead {
         var body: [String: String] = ["id": String(leadId)]
         if let note, !note.isEmpty { body["note"] = note }
