@@ -1,6 +1,31 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Shared components
+
+/// Copies a phone number to the clipboard so it can be pasted into the
+/// Google Voice dialer (Matt's business calls go out on his Voice number,
+/// not his carrier number, so tel: links alone are not enough).
+struct CopyNumberButton: View {
+    let phone: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = phone
+            copied = true
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                copied = false
+            }
+        } label: {
+            Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .tint(copied ? .green : Color.salesNavy)
+    }
+}
 
 struct StatusBadge: View {
     let status: LeadStatus
@@ -431,6 +456,7 @@ struct LeadDetailView: View {
                             HStack {
                                 Label(phone, systemImage: "phone.fill")
                                 Spacer()
+                                CopyNumberButton(phone: phone)
                                 if let url = lead.telURL {
                                     Link("Call", destination: url)
                                 }
@@ -957,12 +983,16 @@ struct CallListRow: View {
             }
 
             if let phone = lead.phone, !phone.isEmpty, let url = lead.telURL {
-                Link(destination: url) {
-                    Label(phone, systemImage: "phone.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Color.salesNavy)
+                HStack {
+                    Link(destination: url) {
+                        Label(phone, systemImage: "phone.fill")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.salesNavy)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    CopyNumberButton(phone: phone)
                 }
-                .buttonStyle(.plain)
             }
 
             if let email = lead.email, !email.isEmpty {
