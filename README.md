@@ -26,13 +26,27 @@ third-party dependencies, no web views.
 - **Interest** — the leads who replied or are marked interested, newest
   first, with the reply snippet. Tap a row for the full lead, including
   the email thread (lead detail has an Emails section too).
+- **Call List** (v1.2) — Matt's personal calling list: the 155
+  St. George-area numbers, priority first, each with tap-to-call,
+  status/priority badges, the last history entry, and an inline outcome
+  form (outcome, notes, email, discussion time) that posts to
+  `log_call_outcome` — the same endpoint as the web Call List, so an
+  "interested" outcome pins the lead to the top and fires the interest
+  push.
+- **Email opens + priority** (v1.2) — leads show a "★ Priority N" badge
+  and an "Opened ×N" badge; lead detail shows the priority and
+  "Opened — N times · last …" (or "Not opened yet"); the dashboard
+  funnel gains an "Emails opened" tile. All from the API fields that
+  already existed (`priority`, `open_count`, `opens`,
+  `emails_opened`/`opens_total`).
 
 ## How it talks to the CRM
 
 Same JSON API as the web UI (`api.php`): `dashboard`, `leads`, `lead`,
 `update_lead`, `log_call`, `log_reply`, `record_bounce`, `add_lead`,
 `queue_batch`, `actions`, `list_emails`, `interested_leads`,
-`queue_email`. See `../riley-crm/API.md` for the spec.
+`queue_email`, `call_list`, `log_call_outcome`. See `../riley-crm/API.md`
+for the spec.
 
 Auth is the **session cookie**: POST the password to `login.php`, and the
 cookie authenticates every API call after that. There is no API token in
@@ -76,6 +90,18 @@ Tested (Nov 11, 2026, v1.1, against the live endpoint):
   back `status: queued`, and the test row was deleted from the CRM
   database seconds later, before the bridge could send it. No mail went
   to any real lead.
+
+Tested (Nov 12, 2026, v1.2, against the live endpoint):
+
+- `call_list` returns 200 with 155 rows; row keys match the app model
+  (incl. `priority` and nested `last_history`), order is priority-first.
+- `leads` rows carry `priority` + `open_count`; `lead` carries the
+  nested `opens {count, first_at, last_at}`; `dashboard` carries
+  `emails_opened` + `opens_total` (both 0 today — no tracked opens yet,
+  which matches the web dashboard).
+- `log_call_outcome` was verified end-to-end on the web side Nov 11
+  (throwaway lead, since deleted); it was NOT re-executed from the app
+  against the live database.
 
 Not tested (needs a phone):
 
