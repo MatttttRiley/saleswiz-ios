@@ -33,6 +33,11 @@ third-party dependencies, no web views.
   `log_call_outcome` — the same endpoint as the web Call List, so an
   "interested" outcome pins the lead to the top and fires the interest
   push.
+- **Copy number** (v1.2.1) — every Call List card and the lead page get
+  a Copy button next to the phone number, so the number can be pasted
+  into the Google Voice dialer. Matt's business calls go out on his
+  Voice number, not his carrier number, so tap-to-call (tel:) alone
+  would show the wrong caller ID.
 - **Email opens + priority** (v1.2) — leads show a "★ Priority N" badge
   and an "Opened ×N" badge; lead detail shows the priority and
   "Opened — N times · last …" (or "Not opened yet"); the dashboard
