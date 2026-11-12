@@ -1039,6 +1039,12 @@ struct CallListRow: View {
     }
 }
 
+struct CallLogRequest: Identifiable {
+    let lead: Lead
+    let outcome: String
+    var id: String { "\(lead.id)-\(outcome)" }
+}
+
 struct CallListView: View {
     @EnvironmentObject var api: APIClient
     @State private var leads: [Lead] = []
@@ -1046,7 +1052,8 @@ struct CallListView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var searchText = ""
-    @State private var loggingLead: Lead?
+    @State private var loggingRequest: CallLogRequest?
+    @State private var disinterestTarget: Lead?
 
     private var filtered: [Lead] {
         guard !searchText.isEmpty else { return leads }
@@ -1066,13 +1073,35 @@ struct CallListView: View {
                     Section {
                         ForEach(filtered) { lead in
                             CallListRow(lead: lead) { selected in
-                                loggingLead = selected
+                                loggingRequest = CallLogRequest(lead: selected, outcome: "interested")
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    disinterestTarget = lead
+                                } label: {
+                                    Label("Not interested", systemImage: "hand.raised.fill")
+                                }
+                                .tint(.red)
+                                Button {
+                                    loggingRequest = CallLogRequest(lead: lead, outcome: "interested")
+                                } label: {
+                                    Label("Interested", systemImage: "star.fill")
+                                }
+                                .tint(.green)
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button {
+                                    loggingRequest = CallLogRequest(lead: lead, outcome: "interested")
+                                } label: {
+                                    Label("Interested", systemImage: "star.fill")
+                                }
+                                .tint(.green)
                             }
                         }
                     } header: {
                         Text("\(total) businesses to call")
                     } footer: {
-                        Text("Tap a number to call. Log the outcome right after — a successful call pushes the lead to the top of the CRM.")
+                        Text("Tap a number to call, or Copy it to paste into Google Voice. Swipe a card for quick actions: Interested opens the notes form and pushes the lead to the top; Not interested removes it from this list.")
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -1096,10 +1125,28 @@ struct CallListView: View {
         }
         .searchable(text: $searchText, prompt: "Search name, city, phone")
         .task { await load() }
-        .sheet(item: $loggingLead) { lead in
-            LogCallOutcomeSheet(lead: lead) {
+        .sheet(item: $loggingRequest) { request in
+            LogCallOutcomeSheet(lead: request.lead, initialOutcome: request.outcome) {
                 Task { await load() }
             }
+        }
+        .confirmationDialog(
+            "Mark as not interested?",
+            isPresented: Binding(
+                get: { disinterestTarget != nil },
+                set: { presented in if !presented { disinterestTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Not interested — remove from my list", role: .destructive) {
+                if let target = disinterestTarget {
+                    disinterestTarget = nil
+                    Task { await markNotInterested(target) }
+                }
+            }
+            Button("Cancel", role: .cancel) { disinterestTarget = nil }
+        } message: {
+            Text("\(disinterestTarget?.name ?? "This lead") is logged as not interested and flagged do-not-call, so it leaves your Call List for good. Its record stays in the CRM so it never gets added back.")
         }
         .alert("Couldn't load the call list", isPresented: .constant(errorMessage != nil && !leads.isEmpty)) {
             Button("OK") { errorMessage = nil }
@@ -1120,6 +1167,23 @@ struct CallListView: View {
         }
         isLoading = false
     }
+
+    /// Swipe-left "Not interested": logs the call outcome (status lost,
+    /// priority 0), then flags do-not-call so the server drops the lead
+    /// from the call list. Removed locally at once so the row is gone
+    /// without waiting for a reload.
+    private func markNotInterested(_ lead: Lead) async {
+        do {
+            _ = try await api.logCallOutcome(
+                leadId: lead.id, outcome: "not_interested",
+                notes: nil, email: nil, followUp: nil)
+            _ = try await api.markDoNotCall(leadId: lead.id)
+            leads.removeAll { $0.id == lead.id }
+            total = max(0, total - 1)
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
 }
 
 struct LogCallOutcomeSheet: View {
@@ -1128,12 +1192,18 @@ struct LogCallOutcomeSheet: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
 
-    @State private var outcome = "interested"
+    @State private var outcome: String
     @State private var notes = ""
     @State private var email = ""
     @State private var followUp = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
+
+    init(lead: Lead, initialOutcome: String = "interested", onSaved: @escaping () -> Void) {
+        self.lead = lead
+        self.onSaved = onSaved
+        _outcome = State(initialValue: initialOutcome)
+    }
 
     var body: some View {
         NavigationStack {
